@@ -20,6 +20,18 @@ class RepairAppSpec extends FunSuite {
     assertEquals(store.load("session-1").lastOption, Some(event))
   }
 
+  test("RequestRepair の reason が空なら DomainError を返す") {
+    val store = new InMemoryEventStore
+    val app = new RepairApp(store)
+    val slot = SlotNo.from(1).getOrElse(fail("valid slot expected"))
+    val at = Instant.parse("2026-02-19T10:00:00+09:00")
+
+    val result = app.handle(RequestRepair("session-1", slot, "   ", at))
+
+    assertEquals(result, Left(InvalidRepairRequest("reason must not be empty")))
+    assertEquals(store.load("session-1"), Vector.empty)
+  }
+
   test("ReconcileSession で SessionReconciled を追記する") {
     val store = new InMemoryEventStore
     val app = new RepairApp(store)

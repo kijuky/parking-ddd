@@ -57,6 +57,9 @@ case class MissingTimeBand(at: Instant, zoneId: ZoneId, details: String) extends
   override def message: String =
     s"Missing time band at ${ZonedDateTime.ofInstant(at, zoneId)} in zone=$zoneId details=$details"
 }
+case class InvalidRepairRequest(details: String) extends DomainError {
+  override def message: String = s"Invalid repair request: $details"
+}
 
 sealed trait CapRule
 case object Uncapped extends CapRule
@@ -105,6 +108,7 @@ final case class PricingCalendar(
   private def validateBands(label: String, bands: Vector[TimeBand]): Either[DomainError, Unit] = {
     if (bands.isEmpty) return Left(InvalidPricingCalendar(s"$label bands are empty"))
 
+    // Lightweight startup-time validation: ensure each minute in a day maps to exactly one band.
     val invalidMinute = (0 until 24 * 60).find { minute =>
       val t = LocalTime.of(minute / 60, minute % 60)
       bands.count(_.contains(t)) != 1
