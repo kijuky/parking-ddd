@@ -155,14 +155,14 @@ object FeePolicy {
   val pricingZone: ZoneId = calendar.zoneId
   private val validatedCalendar: Either[DomainError, PricingCalendar] = calendar.validate
 
-  def pricingSummary: String = {
-    val weekdayDay = bandByName(calendar.weekdayBands, dayBand)
-    val weekdayNight = bandByName(calendar.weekdayBands, nightBand)
-    val weekendDay = bandByName(calendar.weekendBands, dayBand)
-    val weekendNight = bandByName(calendar.weekendBands, nightBand)
-
-    s"最初の${freeMinutes}分無料 / 平日 ${formatBand(weekdayDay)} / 平日 ${formatBand(weekdayNight)} / 休日(土日) ${formatBand(weekendDay)} / 休日(土日) ${formatBand(weekendNight)}"
-  }
+  def pricingSummary: Either[DomainError, String] =
+    for {
+      weekdayDay <- bandByName(calendar.weekdayBands, dayBand, "weekday")
+      weekdayNight <- bandByName(calendar.weekdayBands, nightBand, "weekday")
+      weekendDay <- bandByName(calendar.weekendBands, dayBand, "weekend")
+      weekendNight <- bandByName(calendar.weekendBands, nightBand, "weekend")
+    } yield
+      s"最初の${freeMinutes}分無料 / 平日 ${formatBand(weekdayDay)} / 平日 ${formatBand(weekdayNight)} / 休日(土日) ${formatBand(weekendDay)} / 休日(土日) ${formatBand(weekendNight)}"
 
   def calcMinutes(start: Instant, end: Instant): Long =
     Math.max(0L, Duration.between(start, end).toMinutes)
@@ -251,8 +251,8 @@ object FeePolicy {
   private def formatEndTime(start: LocalTime, end: LocalTime): String =
     if (end.isBefore(start)) s"翌${formatTime(end)}" else formatTime(end)
 
-  private def bandByName(bands: Vector[TimeBand], name: String): TimeBand =
-    bands.find(_.name == name).getOrElse(throw new IllegalStateException(s"Missing band: $name"))
+  private def bandByName(bands: Vector[TimeBand], name: String, label: String): Either[DomainError, TimeBand] =
+    bands.find(_.name == name).toRight(InvalidPricingCalendar(s"$label band '$name' is missing"))
 
   private def bandAt(at: Instant, zoneId: ZoneId, calendar: PricingCalendar): Either[DomainError, TimeBand] = {
     val zdt = ZonedDateTime.ofInstant(at, zoneId)

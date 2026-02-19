@@ -13,7 +13,13 @@ import scala.io.StdIn.readLine
   val registry = new SlotRegistry
   val app = new ParkingApp(store, registry)
 
-  println(s"コインパーキングCLI。料金: ${FeePolicy.pricingSummary}。1〜9を入力（同じ番号で入出庫）。qで終了。")
+  FeePolicy.pricingSummary match {
+    case Left(err) =>
+      System.err.println(s"[設定エラー] ${err.message}")
+      return
+    case Right(summary) =>
+      println(s"コインパーキングCLI。料金: ${summary}。1〜9を入力（同じ番号で入出庫）。qで終了。")
+  }
 
   var continue = true
   while (continue) {
@@ -24,11 +30,11 @@ import scala.io.StdIn.readLine
       case s if s.matches("[1-9]") =>
         SlotNo.from(s.toInt).foreach { slot =>
           app.handle(Pressed(slot, Instant.now())) match {
-            case Left(err) => println(s"[整合性エラー] ${err.message}")
+            case Left(err) => System.err.println(s"[整合性エラー] ${err.message}")
             case Right(_) => ()
           }
         }
-      case _ => println("1〜9の数字か q を入力してね")
+      case _ => System.err.println("1〜9の数字か q を入力してね")
     }
   }
   println("bye")
