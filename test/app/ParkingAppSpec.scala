@@ -20,4 +20,19 @@ class ParkingAppSpec extends FunSuite {
     val result = app.handle(Pressed(slot, Instant.parse("2026-02-19T10:00:00Z")))
     assertEquals(result, Left(CorruptedEventStream(sessionId, slot, "CarEntered is missing")))
   }
+
+  test("出庫時に CarEntered が重複していれば DomainError を返す") {
+    val store = new InMemoryEventStore
+    val registry = new SlotRegistry
+    val app = new ParkingApp(store, registry)
+    val slot = SlotNo.from(2).getOrElse(fail("valid slot expected"))
+    val sessionId = "duplicated-entered-session"
+
+    registry.park(slot, sessionId)
+    store.append(CarEntered(sessionId, slot, Instant.parse("2026-02-19T09:00:00Z")))
+    store.append(CarEntered(sessionId, slot, Instant.parse("2026-02-19T09:01:00Z")))
+
+    val result = app.handle(Pressed(slot, Instant.parse("2026-02-19T10:00:00Z")))
+    assertEquals(result, Left(CorruptedEventStream(sessionId, slot, "Multiple CarEntered found")))
+  }
 }
