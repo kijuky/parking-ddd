@@ -6,6 +6,7 @@ Parking DDD (Scala 3)
 このファイルは **エージェント作業ルール** を記述します。
 プロダクト仕様（料金体系・ドメインルール）の正本は [README.md](./README.md) です。
 料金仕様は [README の料金ポリシー節](./README.md#pricing-policy-current) を参照してください。
+用語の解釈は [用語集](./docs/glossary.md) を優先してください。
 
 ゴール
 	•	Bounded Context / レイヤ分離の体験

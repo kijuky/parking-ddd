@@ -4,6 +4,7 @@ Parking DDD (Scala 3)
 永続DBは使わず、ドメインイベントを真実の源泉 (Source of Truth) として扱います。
 
 このREADMEは、プロジェクト仕様と実装状況の正本ドキュメントです。
+用語定義は [用語集](./docs/glossary.md) を参照してください。
 
 ゴール
 	•	ドメイン知識を壊さずに機能追加する
@@ -78,8 +79,8 @@ Parking DDD (Scala 3)
 	•	夜(18:00-翌9:00): 60分ごと100円（切り上げ、最大900円）
 	•	昼夜や日付（0:00）をまたぐ場合は、時間帯ごとに分割して料金を合算
 	•	最大料金は「同一料金帯の連続区間」に適用
-	•	料金計算は `domain.FeePolicy` に集約
-	•	CLI の料金表示は `FeePolicy.pricingSummary` を参照（文言ハードコードを排除）
+	•	料金計算は [`domain.FeePolicy`](./src/domain/ParkingDomain.scala) に集約
+	•	CLI の料金表示は [`FeePolicy.pricingSummary`](./src/domain/ParkingDomain.scala) を参照（文言ハードコードを排除）
 	•	スロット番号:
 	•	`SlotNo` は値オブジェクト化済み（`SlotNo.from` で 1..9 を検証）
 	•	破損イベント列の検知:
@@ -87,7 +88,7 @@ Parking DDD (Scala 3)
 	•	補正イベント（最小設計）:
 	•	コマンド: `RequestRepair`, `ReconcileSession`
 	•	イベント: `DataRepairRequested`, `SessionReconciled`
-	•	`app.RepairApp` でイベント追記まで実装済み
+	•	[`app.RepairApp`](./src/app/RepairApp.scala) でイベント追記まで実装済み
 
 ⸻
 

@@ -1,5 +1,10 @@
 # 補正イベント最小設計
 
+関連参照:
+- [用語集](./glossary.md)
+- 実装: [`src/domain/ParkingDomain.scala`](../src/domain/ParkingDomain.scala)
+- 実装: [`src/app/RepairApp.scala`](../src/app/RepairApp.scala)
+
 ## 目的
 - 破損イベント列を検知したとき、既存イベントを削除せずに補正可能にする。
 - 監査可能性を維持するため、補正操作自体をイベントとして残す。
