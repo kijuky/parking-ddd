@@ -13,7 +13,7 @@ import scala.io.StdIn.readLine
   val registry = new SlotRegistry
   val app = new ParkingApp(store, registry)
 
-  println("コインパーキングCLI。料金: 30分ごと200円（最初の5分無料）。1〜9を入力（同じ番号で入出庫）。qで終了。")
+  println(s"コインパーキングCLI。料金: ${FeePolicy.pricingSummary}。1〜9を入力（同じ番号で入出庫）。qで終了。")
 
   var continue = true
   while (continue) {

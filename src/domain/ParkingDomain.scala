@@ -1,6 +1,6 @@
 package domain
 
-import java.time.{Duration, Instant}
+import java.time.{Duration, Instant, LocalTime, ZoneId, ZonedDateTime}
 
 final case class SlotNo private (value: Int) {
   override def toString: String = value.toString
@@ -49,19 +49,75 @@ case class SessionReconciled(
 case class CorruptedEventStream(sessionId: SessionId, slot: SlotNo, details: String)
   extends RuntimeException(s"Corrupted event stream: sessionId=$sessionId slot=$slot details=$details")
 
-// Fee policy: first 5 min free, then 200 yen / 30 min (round up)
+final case class Rate(unitMinutes: Long, unitYen: Int, maxYen: Option[Int])
+
+// Fee policy:
+// - first 5 min free
+// - day (09:00-18:00): 200 yen / 30 min (round up)
+// - night (18:00-09:00): 200 yen / 60 min (round up), capped at 1800 yen
 object FeePolicy {
   val freeMinutes = 5L
-  val unitMinutes = 30L
-  val unitYen = 200
+  val pricingZone: ZoneId = ZoneId.of("Asia/Tokyo")
+  val dayStart = LocalTime.of(9, 0)
+  val dayEnd = LocalTime.of(18, 0)
+  val dayRate = Rate(unitMinutes = 30L, unitYen = 200, maxYen = None)
+  val nightRate = Rate(unitMinutes = 60L, unitYen = 200, maxYen = Some(1800))
+
+  def pricingSummary: String =
+    s"最初の${freeMinutes}分無料 / 昼(9:00-18:00) ${formatRate(dayRate)} / 夜(18:00-翌9:00) ${formatRate(nightRate)}"
+
   def calcMinutes(start: Instant, end: Instant): Long =
     Math.max(0L, Duration.between(start, end).toMinutes)
-  def calcFeeYen(minutes: Long): Int = {
-    if (minutes <= freeMinutes) 0
-    else {
-      val units = ((minutes + unitMinutes - 1) / unitMinutes).toInt // ceil
-      units * unitYen
+
+  def calcFeeYen(start: Instant, end: Instant): Int =
+    calcFeeYen(start, end, pricingZone)
+
+  def calcFeeYen(start: Instant, end: Instant, zoneId: ZoneId): Int = {
+    val totalMinutes = calcMinutes(start, end)
+    if (totalMinutes <= freeMinutes) return 0
+    if (!start.isBefore(end)) return 0
+
+    var current = start
+    var totalFee = 0
+    while (current.isBefore(end)) {
+      val rate = rateAt(current, zoneId)
+      val boundary = nextBoundary(current, zoneId)
+      val segmentEnd = if (boundary.isBefore(end)) boundary else end
+      val minutes = calcMinutes(current, segmentEnd)
+      if (minutes > 0) totalFee += feeForSegment(minutes, rate)
+      current = segmentEnd
     }
+    totalFee
+  }
+
+  private def feeForSegment(minutes: Long, rate: Rate): Int = {
+    val units = ((minutes + rate.unitMinutes - 1) / rate.unitMinutes).toInt
+    val rawFee = units * rate.unitYen
+    rate.maxYen.map(max => Math.min(rawFee, max)).getOrElse(rawFee)
+  }
+
+  private def formatRate(rate: Rate): String = {
+    val cap = rate.maxYen.map(max => s"(最大${max}円)").getOrElse("(上限なし)")
+    s"${rate.unitMinutes}分ごと${rate.unitYen}円$cap"
+  }
+
+  private def rateAt(at: Instant, zoneId: ZoneId): Rate = {
+    val localTime = ZonedDateTime.ofInstant(at, zoneId).toLocalTime
+    if (!localTime.isBefore(dayStart) && localTime.isBefore(dayEnd)) dayRate else nightRate
+  }
+
+  private def nextBoundary(at: Instant, zoneId: ZoneId): Instant = {
+    val zdt = ZonedDateTime.ofInstant(at, zoneId)
+    val time = zdt.toLocalTime
+
+    val next =
+      if (!time.isBefore(dayStart) && time.isBefore(dayEnd))
+        zdt.withHour(dayEnd.getHour).withMinute(0).withSecond(0).withNano(0)
+      else if (time.isBefore(dayStart))
+        zdt.withHour(dayStart.getHour).withMinute(0).withSecond(0).withNano(0)
+      else
+        zdt.toLocalDate.plusDays(1).atTime(dayStart).atZone(zoneId)
+    next.toInstant
   }
 }
 
@@ -75,16 +131,16 @@ object RepairPolicy {
     at: Instant
   ): SessionReconciled = {
     val minutes = FeePolicy.calcMinutes(correctedEnteredAt, correctedExitedAt)
-    val feeYen = FeePolicy.calcFeeYen(minutes)
+    val feeYen = FeePolicy.calcFeeYen(correctedEnteredAt, correctedExitedAt)
     SessionReconciled(sessionId, slot, correctedEnteredAt, correctedExitedAt, minutes, feeYen, note, at)
   }
 }
 
 // Aggregate (per session)
 case class ParkingSession(sessionId: SessionId, slot: SlotNo, enteredAt: Instant) {
-def exit(at: Instant): (CarExited, FeeCalculated) = {
+  def exit(at: Instant): (CarExited, FeeCalculated) = {
     val minutes = FeePolicy.calcMinutes(enteredAt, at)
-    val fee = FeePolicy.calcFeeYen(minutes)
+    val fee = FeePolicy.calcFeeYen(enteredAt, at)
     (CarExited(sessionId, slot, at), FeeCalculated(sessionId, slot, minutes, fee))
   }
 }
