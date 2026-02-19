@@ -32,7 +32,7 @@
 
 ## ドメインエラー
 業務上想定される失敗を `DomainError` で表現する。
-現在は `CorruptedEventStream`, `InvalidPricingCalendar`, `MissingTimeBand` を使用し、`Either[DomainError, ...]` で返す。
+現在は `CorruptedEventStream`, `InvalidPricingCalendar`, `MissingTimeBand`, `InvalidRepairRequest` を使用し、`Either[DomainError, ...]` で返す。
 実装参照: [`DomainError`](../src/domain/ParkingDomain.scala), [`ParkingApp.handle`](../src/app/ParkingApp.scala)
 
 ## 破損イベント列
