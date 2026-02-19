@@ -1,32 +1,16 @@
 Parking DDD (Scala 3)
 
-小さなコインパーキングを題材に、DDD + Event Sourcing + FP スタイルの設計を練習するための教材プロジェクトです。永続DBは使わず、ドメインイベントを真実の源泉 (Source of Truth) として扱います。
+小さなコインパーキングを題材に、DDD + Event Sourcing + FP スタイルの設計を練習する教材プロジェクトです。
+永続DBは使わず、ドメインイベントを真実の源泉 (Source of Truth) として扱います。
+
+このファイルは **エージェント作業ルール** を記述します。
+プロダクト仕様（料金体系・ドメインルール）の正本は `README.md` です。
 
 ゴール
 	•	Bounded Context / レイヤ分離の体験
 	•	Aggregate と Policy の分離
 	•	「状態 = イベントの再生結果」を体感する
 	•	将来、AI エージェントが理解しやすい構造にする
-
-⸻
-
-実行方法
-
-前提: scala-cli をインストール済み
-
-scala-cli run .
-
-起動後、1〜9 の数字で操作できます（同じ番号の再押下で出庫）。q で終了。
-
-⸻
-
-料金ポリシー
-	•	30分ごと 200円
-	•	切り上げ課金
-
-例: 1分 → 200円 / 31分 → 400円
-
-domain.FeePolicy に集約されています（UI/アプリ層から計算ロジックを分離）。
 
 ⸻
 
@@ -48,21 +32,22 @@ src/
 
 ⸻
 
-ドメインイベント
-	•	CarEntered
-	•	CarExited
-	•	FeeCalculated
-
-イベントは「事実の記録」であり、取り消しません。状態表示は Read Model（SlotRegistry）が担当します。
+エージェント向け運用ルール
+	•	仕様判断が必要なときは `README.md` を優先する
+	•	仕様を更新したら、まず `README.md` を更新し、必要なら `AGENTS.md` は参照リンクだけ調整する
+	•	イベントは削除/更新せず追記のみ（Event Sourcing）
+	•	破損イベント列は fail-fast で扱い、補正は補正イベント追記で扱う
+	•	CLI の表示文言にドメイン仕様をハードコードしない（例: `FeePolicy.pricingSummary` を参照）
+	•	料金計算は必ず `domain.FeePolicy` を通す
+	•	`domain` は純粋に保ち、副作用は `app/infra/cli` に閉じ込める
 
 ⸻
 
-今後の拡張案
-	•	EventStore をファイル永続化（再起動復元）
-	•	料金テーブルの外部設定化
-	•	時間帯料金 / 上限料金の導入
-	•	Web UI 追加（CLI は残す）
-	•	テスト: イベント列を与えて期待イベントを検証する
+実行コマンド（エージェント推奨）
+	•	起動: `scala-cli run .`
+	•	テスト: `scala-cli test . --server=false`
+
+`--server=false` を付けると、環境によって発生する Bloop/権限エラーを回避しやすくなります。
 
 ⸻
 
