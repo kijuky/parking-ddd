@@ -13,7 +13,8 @@ class RepairAppSpec extends FunSuite {
     val slot = SlotNo.from(1).getOrElse(fail("valid slot expected"))
     val at = Instant.parse("2026-02-19T10:00:00+09:00")
 
-    val event = app.handle(RequestRepair("session-1", slot, "missing CarEntered", at))
+    val result = app.handle(RequestRepair("session-1", slot, "missing CarEntered", at))
+    val event = result.getOrElse(fail("expected successful repair request"))
 
     assertEquals(event, DataRepairRequested("session-1", slot, "missing CarEntered", at))
     assertEquals(store.load("session-1").lastOption, Some(event))
