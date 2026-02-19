@@ -6,53 +6,32 @@ import munit.FunSuite
 class FeePolicySpec extends FunSuite {
 
   private val zone = ZoneId.of("Asia/Tokyo")
-  private val weekdayParkedAt = Instant.parse("2026-02-19T09:00:00+09:00") // Thu
+  private final case class FeeCase(name: String, start: String, end: String, expectedYen: Int)
+  private def jst(s: String): Instant = Instant.parse(s"$s+09:00")
 
-  private def weekdayAt(time: String): Instant =
-    Instant.parse(s"2026-02-19T$time:00+09:00")
+  private val feeCases = Vector(
+    FeeCase("5分境界: 5分までは無料", "2026-02-19T09:00:00", "2026-02-19T09:05:00", 0),
+    FeeCase("5分境界: 6分で課金開始", "2026-02-19T09:00:00", "2026-02-19T09:06:00", 200),
+    FeeCase("30分境界: 平日昼30分は200円", "2026-02-19T09:00:00", "2026-02-19T09:30:00", 200),
+    FeeCase("30分境界: 平日昼31分は400円", "2026-02-19T09:00:00", "2026-02-19T09:31:00", 400),
+    FeeCase("60分境界: 平日夜60分は200円", "2026-02-19T18:00:00", "2026-02-19T19:00:00", 200),
+    FeeCase("60分境界: 平日夜61分は400円", "2026-02-19T18:00:00", "2026-02-19T19:01:00", 400),
+    FeeCase("9:00境界: 平日夜→平日昼を分割合算", "2026-02-20T08:30:00", "2026-02-20T09:30:00", 400),
+    FeeCase("18:00境界: 平日昼→平日夜を分割合算", "2026-02-20T17:30:00", "2026-02-20T18:30:00", 400),
+    FeeCase("0:00境界: 金曜夜→土曜夜を分割合算", "2026-02-20T23:30:00", "2026-02-21T00:30:00", 300),
+    FeeCase("休日昼: 60分ごと200円", "2026-02-21T09:00:00", "2026-02-21T10:00:00", 200),
+    FeeCase("休日昼: 61分で400円", "2026-02-21T09:00:00", "2026-02-21T10:01:00", 400),
+    FeeCase("休日昼: 最大1800円", "2026-02-21T09:00:00", "2026-02-21T18:00:00", 1800),
+    FeeCase("休日夜: 60分ごと100円", "2026-02-21T18:00:00", "2026-02-21T19:00:00", 100),
+    FeeCase("休日夜: 61分で200円", "2026-02-21T18:00:00", "2026-02-21T19:01:00", 200),
+    FeeCase("休日夜: 最大900円", "2026-02-21T18:00:00", "2026-02-22T09:00:00", 900),
+    FeeCase("平日夜: 最大1800円", "2026-02-19T18:00:00", "2026-02-20T09:00:00", 1800)
+  )
 
-  test("最初の5分は無料") {
-    assertEquals(FeePolicy.calcFeeYen(weekdayParkedAt, weekdayAt("09:05"), zone), 0)
-  }
-
-  test("平日昼: 9:06 から 200円") {
-    assertEquals(FeePolicy.calcFeeYen(weekdayParkedAt, weekdayAt("09:06"), zone), 200)
-  }
-
-  test("平日昼: 9:31 から 400円") {
-    assertEquals(FeePolicy.calcFeeYen(weekdayParkedAt, weekdayAt("09:31"), zone), 400)
-  }
-
-  test("平日夜: 60分ごと 200円") {
-    val start = Instant.parse("2026-02-19T18:00:00+09:00")
-    assertEquals(FeePolicy.calcFeeYen(start, Instant.parse("2026-02-19T19:00:00+09:00"), zone), 200)
-    assertEquals(FeePolicy.calcFeeYen(start, Instant.parse("2026-02-19T19:01:00+09:00"), zone), 400)
-  }
-
-  test("平日夜は最大1800円で頭打ち") {
-    val start = Instant.parse("2026-02-19T18:00:00+09:00")
-    val end = Instant.parse("2026-02-20T09:00:00+09:00")
-    assertEquals(FeePolicy.calcFeeYen(start, end, zone), 1800)
-  }
-
-  test("休日昼: 60分ごと 200円、最大1800円") {
-    val start = Instant.parse("2026-02-21T09:00:00+09:00") // Sat
-    assertEquals(FeePolicy.calcFeeYen(start, Instant.parse("2026-02-21T10:00:00+09:00"), zone), 200)
-    assertEquals(FeePolicy.calcFeeYen(start, Instant.parse("2026-02-21T10:01:00+09:00"), zone), 400)
-    assertEquals(FeePolicy.calcFeeYen(start, Instant.parse("2026-02-21T18:00:00+09:00"), zone), 1800)
-  }
-
-  test("休日夜: 60分ごと 100円、最大900円") {
-    val start = Instant.parse("2026-02-21T18:00:00+09:00") // Sat
-    assertEquals(FeePolicy.calcFeeYen(start, Instant.parse("2026-02-21T19:00:00+09:00"), zone), 100)
-    assertEquals(FeePolicy.calcFeeYen(start, Instant.parse("2026-02-21T19:01:00+09:00"), zone), 200)
-    assertEquals(FeePolicy.calcFeeYen(start, Instant.parse("2026-02-22T09:00:00+09:00"), zone), 900)
-  }
-
-  test("金曜夜から土曜朝は 0:00 を跨いで平日夜→休日夜で合算する") {
-    val start = Instant.parse("2026-02-20T23:30:00+09:00") // Fri
-    val end = Instant.parse("2026-02-21T00:30:00+09:00") // Sat
-    assertEquals(FeePolicy.calcFeeYen(start, end, zone), 300)
+  feeCases.foreach { c =>
+    test(s"料金テーブル: ${c.name}") {
+      assertEquals(FeePolicy.calcFeeYen(jst(c.start), jst(c.end), zone), c.expectedYen)
+    }
   }
 
   test("料金説明文を生成できる") {
