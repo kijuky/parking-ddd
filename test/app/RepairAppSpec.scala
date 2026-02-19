@@ -6,6 +6,7 @@ import java.time.Instant
 import munit.FunSuite
 
 class RepairAppSpec extends FunSuite {
+  private def yen(value: Int): Money = Money.unsafe(value)
 
   test("RequestRepair で DataRepairRequested を追記する") {
     val store = new InMemoryEventStore
@@ -54,7 +55,7 @@ class RepairAppSpec extends FunSuite {
 
     assertEquals(
       event,
-      SessionReconciled("session-2", slot, enteredAt, exitedAt, 31L, 400, "operator fixed from CCTV log", at)
+      SessionReconciled("session-2", slot, enteredAt, exitedAt, 31L, yen(400), "operator fixed from CCTV log", at)
     )
     assertEquals(store.load("session-2").lastOption, Some(event))
   }

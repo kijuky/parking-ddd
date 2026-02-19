@@ -8,6 +8,7 @@ class FeePolicySpec extends FunSuite {
   private val zone = ZoneId.of("Asia/Tokyo")
   private final case class FeeCase(name: String, start: String, end: String, expectedYen: Int)
   private def jst(s: String): Instant = Instant.parse(s"$s+09:00")
+  private def yen(value: Int): Money = Money.unsafe(value)
 
   private val feeCases = Vector(
     FeeCase("5分境界: 5分までは無料", "2026-02-19T09:00:00", "2026-02-19T09:05:00", 0),
@@ -30,7 +31,7 @@ class FeePolicySpec extends FunSuite {
 
   feeCases.foreach { c =>
     test(s"料金テーブル: ${c.name}") {
-      assertEquals(FeePolicy.calcFeeYen(jst(c.start), jst(c.end), zone), Right(c.expectedYen))
+      assertEquals(FeePolicy.calcFeeYen(jst(c.start), jst(c.end), zone), Right(yen(c.expectedYen)))
     }
   }
 

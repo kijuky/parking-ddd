@@ -8,9 +8,10 @@ class PricingCalendarSpec extends FunSuite {
   private val zone = ZoneId.of("Asia/Tokyo")
   private val dayStart = LocalTime.of(9, 0)
   private val dayEnd = LocalTime.of(18, 0)
+  private def yen(value: Int): Money = Money.unsafe(value)
 
-  private val dayRate = Rate(30L, 200, Uncapped)
-  private val nightRate = Rate(60L, 200, Capped(1800))
+  private val dayRate = Rate(30L, yen(200), Uncapped)
+  private val nightRate = Rate(60L, yen(200), Capped(yen(1800)))
 
   private val validWeekdayBands = Vector(
     TimeBand("day", dayStart, dayEnd, dayRate),
