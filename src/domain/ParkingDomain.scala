@@ -49,7 +49,44 @@ case class SessionReconciled(
 case class CorruptedEventStream(sessionId: SessionId, slot: SlotNo, details: String)
   extends RuntimeException(s"Corrupted event stream: sessionId=$sessionId slot=$slot details=$details")
 
-final case class Rate(unitMinutes: Long, unitYen: Int, maxYen: Option[Int])
+sealed trait CapRule
+case object Uncapped extends CapRule
+final case class Capped(maxYen: Int) extends CapRule
+
+final case class Rate(unitMinutes: Long, unitYen: Int, capRule: CapRule) {
+  def applyCap(feeYen: Int): Int = capRule match {
+    case Uncapped => feeYen
+    case Capped(maxYen) => Math.min(feeYen, maxYen)
+  }
+}
+
+final case class TimeBand(name: String, start: LocalTime, end: LocalTime, rate: Rate) {
+  // end is exclusive. If start > end, band spans midnight.
+  def contains(time: LocalTime): Boolean =
+    if (!start.isAfter(end)) !time.isBefore(start) && time.isBefore(end)
+    else !time.isBefore(start) || time.isBefore(end)
+
+  def nextBoundary(after: ZonedDateTime): Instant = {
+    val startBoundary = nextAtOrNextDay(after, start)
+    val endBoundary = nextAtOrNextDay(after, end)
+    if (startBoundary.isBefore(endBoundary)) startBoundary.toInstant else endBoundary.toInstant
+  }
+
+  private def nextAtOrNextDay(current: ZonedDateTime, time: LocalTime): ZonedDateTime = {
+    val candidate = current.toLocalDate.atTime(time).atZone(current.getZone)
+    if (candidate.isAfter(current)) candidate else candidate.plusDays(1)
+  }
+}
+
+final case class PricingCalendar(
+  zoneId: ZoneId,
+  freeMinutes: Long,
+  weekdayBands: Vector[TimeBand],
+  weekendBands: Vector[TimeBand]
+) {
+  def bandsAt(day: DayOfWeek): Vector[TimeBand] =
+    if (day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY) weekendBands else weekdayBands
+}
 
 // Fee policy:
 // - first 5 min free
@@ -58,14 +95,31 @@ final case class Rate(unitMinutes: Long, unitYen: Int, maxYen: Option[Int])
 // - weekend day (09:00-18:00): 200 yen / 60 min (round up), capped at 1800 yen
 // - weekend night (18:00-09:00): 100 yen / 60 min (round up), capped at 900 yen
 object FeePolicy {
-  val freeMinutes = 5L
-  val pricingZone: ZoneId = ZoneId.of("Asia/Tokyo")
   val dayStart = LocalTime.of(9, 0)
   val dayEnd = LocalTime.of(18, 0)
-  val weekdayDayRate = Rate(unitMinutes = 30L, unitYen = 200, maxYen = None)
-  val weekdayNightRate = Rate(unitMinutes = 60L, unitYen = 200, maxYen = Some(1800))
-  val weekendDayRate = Rate(unitMinutes = 60L, unitYen = 200, maxYen = Some(1800))
-  val weekendNightRate = Rate(unitMinutes = 60L, unitYen = 100, maxYen = Some(900))
+  val dayBand = "day"
+  val nightBand = "night"
+
+  val weekdayDayRate = Rate(unitMinutes = 30L, unitYen = 200, capRule = Uncapped)
+  val weekdayNightRate = Rate(unitMinutes = 60L, unitYen = 200, capRule = Capped(1800))
+  val weekendDayRate = Rate(unitMinutes = 60L, unitYen = 200, capRule = Capped(1800))
+  val weekendNightRate = Rate(unitMinutes = 60L, unitYen = 100, capRule = Capped(900))
+
+  val calendar = PricingCalendar(
+    zoneId = ZoneId.of("Asia/Tokyo"),
+    freeMinutes = 5L,
+    weekdayBands = Vector(
+      TimeBand(dayBand, dayStart, dayEnd, weekdayDayRate),
+      TimeBand(nightBand, dayEnd, dayStart, weekdayNightRate)
+    ),
+    weekendBands = Vector(
+      TimeBand(dayBand, dayStart, dayEnd, weekendDayRate),
+      TimeBand(nightBand, dayEnd, dayStart, weekendNightRate)
+    )
+  )
+
+  val freeMinutes: Long = calendar.freeMinutes
+  val pricingZone: ZoneId = calendar.zoneId
 
   def pricingSummary: String =
     s"最初の${freeMinutes}分無料 / 平日 昼(9:00-18:00) ${formatRate(weekdayDayRate)} / 平日 夜(18:00-翌9:00) ${formatRate(weekdayNightRate)} / 休日(土日) 昼(9:00-18:00) ${formatRate(weekendDayRate)} / 休日(土日) 夜(18:00-翌9:00) ${formatRate(weekendNightRate)}"
@@ -83,7 +137,7 @@ object FeePolicy {
 
     var current = start
     var totalFee = 0
-    var periodRate = rateAt(current, zoneId)
+    var periodBand = bandAt(current, zoneId)
     var periodMinutes = 0L
 
     while (current.isBefore(end)) {
@@ -93,56 +147,44 @@ object FeePolicy {
       if (segmentMinutes > 0) periodMinutes += segmentMinutes
       current = segmentEnd
 
-      val nextRateOpt = Option.when(current.isBefore(end))(rateAt(current, zoneId))
-      if (nextRateOpt.forall(_ != periodRate)) {
-        totalFee += feeForSegment(periodMinutes, periodRate)
+      val nextBandOpt = Option.when(current.isBefore(end))(bandAt(current, zoneId))
+      if (nextBandOpt.forall(_ != periodBand)) {
+        totalFee += feeForBandSegment(periodMinutes, periodBand.rate)
         periodMinutes = 0L
-        nextRateOpt.foreach(nextRate => periodRate = nextRate)
+        nextBandOpt.foreach(nextBand => periodBand = nextBand)
       }
     }
     totalFee
   }
 
-  private def feeForSegment(minutes: Long, rate: Rate): Int = {
+  private def feeForBandSegment(minutes: Long, rate: Rate): Int = {
     val units = ((minutes + rate.unitMinutes - 1) / rate.unitMinutes).toInt
     val rawFee = units * rate.unitYen
-    rate.maxYen.map(max => Math.min(rawFee, max)).getOrElse(rawFee)
+    rate.applyCap(rawFee)
   }
 
   private def formatRate(rate: Rate): String = {
-    val cap = rate.maxYen.map(max => s"(最大${max}円)").getOrElse("(上限なし)")
+    val cap = rate.capRule match {
+      case Uncapped => "(上限なし)"
+      case Capped(maxYen) => s"(最大${maxYen}円)"
+    }
     s"${rate.unitMinutes}分ごと${rate.unitYen}円$cap"
   }
 
-  private def rateAt(at: Instant, zoneId: ZoneId): Rate = {
+  private def bandAt(at: Instant, zoneId: ZoneId): TimeBand = {
     val zdt = ZonedDateTime.ofInstant(at, zoneId)
-    val localTime = zdt.toLocalTime
-    val isDay = !localTime.isBefore(dayStart) && localTime.isBefore(dayEnd)
-    val weekend = isWeekend(zdt.getDayOfWeek)
-
-    (weekend, isDay) match {
-      case (false, true) => weekdayDayRate
-      case (false, false) => weekdayNightRate
-      case (true, true) => weekendDayRate
-      case (true, false) => weekendNightRate
-    }
+    val bands = calendar.bandsAt(zdt.getDayOfWeek)
+    bands.find(_.contains(zdt.toLocalTime)).getOrElse(
+      throw new IllegalStateException(s"No matching time band at $zdt")
+    )
   }
 
   private def nextBoundary(at: Instant, zoneId: ZoneId): Instant = {
     val zdt = ZonedDateTime.ofInstant(at, zoneId)
+    val bandBoundary = bandAt(at, zoneId).nextBoundary(zdt)
     val nextMidnight = zdt.toLocalDate.plusDays(1).atStartOfDay(zoneId)
-    val nextDayStart = nextAtOrNextDay(zdt, dayStart, zoneId)
-    val nextDayEnd = nextAtOrNextDay(zdt, dayEnd, zoneId)
-    Vector(nextMidnight, nextDayStart, nextDayEnd).minBy(_.toInstant).toInstant
+    if (bandBoundary.isBefore(nextMidnight.toInstant)) bandBoundary else nextMidnight.toInstant
   }
-
-  private def nextAtOrNextDay(current: ZonedDateTime, time: LocalTime, zoneId: ZoneId): ZonedDateTime = {
-    val candidate = current.toLocalDate.atTime(time).atZone(zoneId)
-    if (candidate.isAfter(current)) candidate else candidate.plusDays(1)
-  }
-
-  private def isWeekend(day: DayOfWeek): Boolean =
-    day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY
 }
 
 object RepairPolicy {

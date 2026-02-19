@@ -4,7 +4,8 @@ Parking DDD (Scala 3)
 永続DBは使わず、ドメインイベントを真実の源泉 (Source of Truth) として扱います。
 
 このファイルは **エージェント作業ルール** を記述します。
-プロダクト仕様（料金体系・ドメインルール）の正本は `README.md` です。
+プロダクト仕様（料金体系・ドメインルール）の正本は [README.md](./README.md) です。
+料金仕様は [README の料金ポリシー節](./README.md#pricing-policy-current) を参照してください。
 
 ゴール
 	•	Bounded Context / レイヤ分離の体験
@@ -33,8 +34,9 @@ src/
 ⸻
 
 エージェント向け運用ルール
-	•	仕様判断が必要なときは `README.md` を優先する
-	•	仕様を更新したら、まず `README.md` を更新し、必要なら `AGENTS.md` は参照リンクだけ調整する
+	•	仕様判断が必要なときは [README.md](./README.md) を優先する
+	•	仕様を更新したら、まず [README.md](./README.md) を更新し、必要なら `AGENTS.md` は参照リンクだけ調整する
+	•	Markdown 内の参照は相対リンク（例: `[README](./README.md)`）で記述し、節参照は安定アンカー（`#pricing-policy-current` のような id）を使う
 	•	イベントは削除/更新せず追記のみ（Event Sourcing）
 	•	破損イベント列は fail-fast で扱い、補正は補正イベント追記で扱う
 	•	CLI の表示文言にドメイン仕様をハードコードしない（例: `FeePolicy.pricingSummary` を参照）
