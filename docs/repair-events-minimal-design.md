@@ -23,7 +23,7 @@
 
 ## ドメインポリシー
 - `RepairPolicy.reconcile(...)`
-  - 補正後の入出庫時刻から `minutes` / `feeYen` を算出して `SessionReconciled` を生成する。
+  - 補正後の入出庫時刻から `minutes` / `feeYen` を算出し、`Either[DomainError, SessionReconciled]` を返す。
   - 料金計算は既存の `FeePolicy` を必ず通す。
 
 ## 運用フロー（最小）

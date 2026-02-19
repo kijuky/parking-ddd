@@ -27,7 +27,7 @@ class RepairAppSpec extends FunSuite {
     val exitedAt = Instant.parse("2026-02-19T10:31:00+09:00")
     val at = Instant.parse("2026-02-19T10:35:00+09:00")
 
-    val event = app.handle(
+    val result = app.handle(
       ReconcileSession(
         sessionId = "session-2",
         slot = slot,
@@ -37,6 +37,7 @@ class RepairAppSpec extends FunSuite {
         at = at
       )
     )
+    val event = result.getOrElse(fail("expected successful reconciliation"))
 
     assertEquals(
       event,

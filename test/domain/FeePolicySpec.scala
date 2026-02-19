@@ -30,7 +30,7 @@ class FeePolicySpec extends FunSuite {
 
   feeCases.foreach { c =>
     test(s"料金テーブル: ${c.name}") {
-      assertEquals(FeePolicy.calcFeeYen(jst(c.start), jst(c.end), zone), c.expectedYen)
+      assertEquals(FeePolicy.calcFeeYen(jst(c.start), jst(c.end), zone), Right(c.expectedYen))
     }
   }
 

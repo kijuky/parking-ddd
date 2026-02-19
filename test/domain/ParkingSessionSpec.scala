@@ -11,7 +11,8 @@ class ParkingSessionSpec extends FunSuite {
     val slot = SlotNo.from(1).getOrElse(fail("valid slot expected"))
     val session = ParkingSession("session-1", slot, enteredAt)
 
-    val (exited, fee) = session.exit(exitedAt)
+    val result = session.exit(exitedAt)
+    val (exited, fee) = result.getOrElse(fail("expected successful exit"))
 
     assertEquals(exited, CarExited("session-1", slot, exitedAt))
     assertEquals(fee, FeeCalculated("session-1", slot, 31L, 400))

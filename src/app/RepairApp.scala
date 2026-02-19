@@ -11,16 +11,17 @@ class RepairApp(store: InMemoryEventStore) {
   event
   }
 
-  def handle(cmd: ReconcileSession): SessionReconciled = {
-  val event = RepairPolicy.reconcile(
+  def handle(cmd: ReconcileSession): Either[DomainError, SessionReconciled] = {
+  RepairPolicy.reconcile(
       sessionId = cmd.sessionId,
       slot = cmd.slot,
       correctedEnteredAt = cmd.correctedEnteredAt,
       correctedExitedAt = cmd.correctedExitedAt,
       note = cmd.note,
       at = cmd.at
-  )
-  store.append(event)
-  event
+  ).map { event =>
+    store.append(event)
+    event
+  }
   }
 }

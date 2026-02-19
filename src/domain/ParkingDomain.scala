@@ -50,6 +50,13 @@ sealed trait DomainError { def message: String }
 case class CorruptedEventStream(sessionId: SessionId, slot: SlotNo, details: String) extends DomainError {
   override def message: String = s"Corrupted event stream: sessionId=$sessionId slot=$slot details=$details"
 }
+case class InvalidPricingCalendar(details: String) extends DomainError {
+  override def message: String = s"Invalid pricing calendar: $details"
+}
+case class MissingTimeBand(at: Instant, zoneId: ZoneId, details: String) extends DomainError {
+  override def message: String =
+    s"Missing time band at ${ZonedDateTime.ofInstant(at, zoneId)} in zone=$zoneId details=$details"
+}
 
 sealed trait CapRule
 case object Uncapped extends CapRule
@@ -88,6 +95,30 @@ final case class PricingCalendar(
 ) {
   def bandsAt(day: DayOfWeek): Vector[TimeBand] =
     if (day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY) weekendBands else weekdayBands
+
+  def validate: Either[DomainError, PricingCalendar] =
+    for {
+      _ <- validateBands("weekday", weekdayBands)
+      _ <- validateBands("weekend", weekendBands)
+    } yield this
+
+  private def validateBands(label: String, bands: Vector[TimeBand]): Either[DomainError, Unit] = {
+    if (bands.isEmpty) return Left(InvalidPricingCalendar(s"$label bands are empty"))
+
+    val invalidMinute = (0 until 24 * 60).find { minute =>
+      val t = LocalTime.of(minute / 60, minute % 60)
+      bands.count(_.contains(t)) != 1
+    }
+
+    invalidMinute match {
+      case Some(minute) =>
+        val t = LocalTime.of(minute / 60, minute % 60)
+        val matched = bands.filter(_.contains(t)).map(_.name)
+        Left(InvalidPricingCalendar(s"$label bands must cover each minute exactly once (time=$t, matched=$matched)"))
+      case None =>
+        Right(())
+    }
+  }
 }
 
 // Fee policy:
@@ -122,6 +153,7 @@ object FeePolicy {
 
   val freeMinutes: Long = calendar.freeMinutes
   val pricingZone: ZoneId = calendar.zoneId
+  private val validatedCalendar: Either[DomainError, PricingCalendar] = calendar.validate
 
   def pricingSummary: String = {
     val weekdayDay = bandByName(calendar.weekdayBands, dayBand)
@@ -135,34 +167,60 @@ object FeePolicy {
   def calcMinutes(start: Instant, end: Instant): Long =
     Math.max(0L, Duration.between(start, end).toMinutes)
 
-  def calcFeeYen(start: Instant, end: Instant): Int =
+  def calcFeeYen(start: Instant, end: Instant): Either[DomainError, Int] =
     calcFeeYen(start, end, pricingZone)
 
-  def calcFeeYen(start: Instant, end: Instant, zoneId: ZoneId): Int = {
+  def calcFeeYen(start: Instant, end: Instant, zoneId: ZoneId): Either[DomainError, Int] =
+    validatedCalendar.flatMap(calcFeeYenWithCalendar(start, end, zoneId, _))
+
+  private def calcFeeYenWithCalendar(
+    start: Instant,
+    end: Instant,
+    zoneId: ZoneId,
+    calendar: PricingCalendar
+  ): Either[DomainError, Int] = {
     val totalMinutes = calcMinutes(start, end)
-    if (totalMinutes <= freeMinutes) return 0
-    if (!start.isBefore(end)) return 0
+    if (totalMinutes <= freeMinutes) Right(0)
+    else if (!start.isBefore(end)) Right(0)
+    else
+      bandAt(start, zoneId, calendar).flatMap { initialBand =>
+        loop(start, end, zoneId, calendar, initialBand, 0L, 0)
+      }
+  }
 
-    var current = start
-    var totalFee = 0
-    var periodBand = bandAt(current, zoneId)
-    var periodMinutes = 0L
-
-    while (current.isBefore(end)) {
-      val boundary = nextBoundary(current, zoneId)
+  private def loop(
+    current: Instant,
+    end: Instant,
+    zoneId: ZoneId,
+    calendar: PricingCalendar,
+    periodBand: TimeBand,
+    periodMinutes: Long,
+    totalFee: Int
+  ): Either[DomainError, Int] = {
+    if (!current.isBefore(end)) Right(totalFee + feeForBandSegment(periodMinutes, periodBand.rate))
+    else {
+      val boundary = nextBoundary(current, zoneId, periodBand)
       val segmentEnd = if (boundary.isBefore(end)) boundary else end
       val segmentMinutes = calcMinutes(current, segmentEnd)
-      if (segmentMinutes > 0) periodMinutes += segmentMinutes
-      current = segmentEnd
+      val updatedMinutes = periodMinutes + segmentMinutes
 
-      val nextBandOpt = Option.when(current.isBefore(end))(bandAt(current, zoneId))
-      if (nextBandOpt.forall(_ != periodBand)) {
-        totalFee += feeForBandSegment(periodMinutes, periodBand.rate)
-        periodMinutes = 0L
-        nextBandOpt.foreach(nextBand => periodBand = nextBand)
-      }
+      if (!segmentEnd.isBefore(end)) Right(totalFee + feeForBandSegment(updatedMinutes, periodBand.rate))
+      else
+        bandAt(segmentEnd, zoneId, calendar).flatMap { nextBand =>
+          if (nextBand == periodBand)
+            loop(segmentEnd, end, zoneId, calendar, periodBand, updatedMinutes, totalFee)
+          else
+            loop(
+              segmentEnd,
+              end,
+              zoneId,
+              calendar,
+              nextBand,
+              0L,
+              totalFee + feeForBandSegment(updatedMinutes, periodBand.rate)
+            )
+        }
     }
-    totalFee
   }
 
   private def feeForBandSegment(minutes: Long, rate: Rate): Int = {
@@ -196,17 +254,17 @@ object FeePolicy {
   private def bandByName(bands: Vector[TimeBand], name: String): TimeBand =
     bands.find(_.name == name).getOrElse(throw new IllegalStateException(s"Missing band: $name"))
 
-  private def bandAt(at: Instant, zoneId: ZoneId): TimeBand = {
+  private def bandAt(at: Instant, zoneId: ZoneId, calendar: PricingCalendar): Either[DomainError, TimeBand] = {
     val zdt = ZonedDateTime.ofInstant(at, zoneId)
     val bands = calendar.bandsAt(zdt.getDayOfWeek)
-    bands.find(_.contains(zdt.toLocalTime)).getOrElse(
-      throw new IllegalStateException(s"No matching time band at $zdt")
-    )
+    bands
+      .find(_.contains(zdt.toLocalTime))
+      .toRight(MissingTimeBand(at, zoneId, s"matched bands for ${zdt.toLocalTime} not found"))
   }
 
-  private def nextBoundary(at: Instant, zoneId: ZoneId): Instant = {
+  private def nextBoundary(at: Instant, zoneId: ZoneId, band: TimeBand): Instant = {
     val zdt = ZonedDateTime.ofInstant(at, zoneId)
-    val bandBoundary = bandAt(at, zoneId).nextBoundary(zdt)
+    val bandBoundary = band.nextBoundary(zdt)
     val nextMidnight = zdt.toLocalDate.plusDays(1).atStartOfDay(zoneId)
     if (bandBoundary.isBefore(nextMidnight.toInstant)) bandBoundary else nextMidnight.toInstant
   }
@@ -220,18 +278,18 @@ object RepairPolicy {
     correctedExitedAt: Instant,
     note: String,
     at: Instant
-  ): SessionReconciled = {
-    val minutes = FeePolicy.calcMinutes(correctedEnteredAt, correctedExitedAt)
-    val feeYen = FeePolicy.calcFeeYen(correctedEnteredAt, correctedExitedAt)
-    SessionReconciled(sessionId, slot, correctedEnteredAt, correctedExitedAt, minutes, feeYen, note, at)
-  }
+  ): Either[DomainError, SessionReconciled] =
+    FeePolicy.calcFeeYen(correctedEnteredAt, correctedExitedAt).map { feeYen =>
+      val minutes = FeePolicy.calcMinutes(correctedEnteredAt, correctedExitedAt)
+      SessionReconciled(sessionId, slot, correctedEnteredAt, correctedExitedAt, minutes, feeYen, note, at)
+    }
 }
 
 // Aggregate (per session)
 case class ParkingSession(sessionId: SessionId, slot: SlotNo, enteredAt: Instant) {
-  def exit(at: Instant): (CarExited, FeeCalculated) = {
-    val minutes = FeePolicy.calcMinutes(enteredAt, at)
-    val fee = FeePolicy.calcFeeYen(enteredAt, at)
-    (CarExited(sessionId, slot, at), FeeCalculated(sessionId, slot, minutes, fee))
-  }
+  def exit(at: Instant): Either[DomainError, (CarExited, FeeCalculated)] =
+    FeePolicy.calcFeeYen(enteredAt, at).map { fee =>
+      val minutes = FeePolicy.calcMinutes(enteredAt, at)
+      (CarExited(sessionId, slot, at), FeeCalculated(sessionId, slot, minutes, fee))
+    }
 }

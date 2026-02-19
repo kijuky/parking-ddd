@@ -29,13 +29,13 @@ class ParkingApp(store: InMemoryEventStore, registry: SlotRegistry) {
           return Left(CorruptedEventStream(sid, slot, "Multiple CarEntered found"))
       }
       val session = ParkingSession(sid, slot, enteredAt)
-      val (ex, fee) = session.exit(now)
-      store.append(ex); store.append(fee)
-      registry.leave(slot)
+      session.exit(now).map { case (ex, fee) =>
+        store.append(ex); store.append(fee)
+        registry.leave(slot)
 
-      println(s"[出庫]  スロット:$slot  入:${enteredAt}  出:${now}")
-      println(s"         駐車時間:${fee.minutes}分  料金:${fee.feeYen}円")
-      Right(())
+        println(s"[出庫]  スロット:$slot  入:${enteredAt}  出:${now}")
+        println(s"         駐車時間:${fee.minutes}分  料金:${fee.feeYen}円")
+      }
     }
   }
 }
