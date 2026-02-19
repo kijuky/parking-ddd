@@ -33,6 +33,5 @@
 4. 参照系は「最新の `SessionReconciled` があればそれを優先」して表示・集計する。
 
 ## 非目標（この段階では未実装）
-- 補正コマンドを受ける Application Service
 - `SessionReconciled` を反映する専用 Read Model
 - 補正ワークフローの権限管理
