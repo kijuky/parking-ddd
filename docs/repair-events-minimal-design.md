@@ -22,7 +22,7 @@
   - 料金計算は既存の `FeePolicy` を必ず通す。
 
 ## 運用フロー（最小）
-1. 出庫処理でイベント列破損を検知したら `CorruptedEventStream` を通知する。
+1. 出庫処理でイベント列破損を検知したら `Left(CorruptedEventStream)` を返す（`Either[DomainError, ...]`）。
 2. 運用者が `RequestRepair` を実行し、`DataRepairRequested` を追記する。
 3. 調査後に `ReconcileSession` を実行し、`SessionReconciled` を追記する。
 4. 参照系は「最新の `SessionReconciled` があればそれを優先」して表示・集計する。

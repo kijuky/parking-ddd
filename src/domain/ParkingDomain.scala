@@ -46,8 +46,10 @@ case class SessionReconciled(
   at: Instant
 ) extends Event
 
-case class CorruptedEventStream(sessionId: SessionId, slot: SlotNo, details: String)
-  extends RuntimeException(s"Corrupted event stream: sessionId=$sessionId slot=$slot details=$details")
+sealed trait DomainError { def message: String }
+case class CorruptedEventStream(sessionId: SessionId, slot: SlotNo, details: String) extends DomainError {
+  override def message: String = s"Corrupted event stream: sessionId=$sessionId slot=$slot details=$details"
+}
 
 sealed trait CapRule
 case object Uncapped extends CapRule

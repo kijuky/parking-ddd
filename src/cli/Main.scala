@@ -23,10 +23,10 @@ import scala.io.StdIn.readLine
       case "q" | "quit" | "exit" => continue = false
       case s if s.matches("[1-9]") =>
         SlotNo.from(s.toInt).foreach { slot =>
-          try app.handle(Pressed(slot, Instant.now()))
-          catch
-            case e: CorruptedEventStream =>
-              println(s"[整合性エラー] ${e.getMessage}")
+          app.handle(Pressed(slot, Instant.now())) match {
+            case Left(err) => println(s"[整合性エラー] ${err.message}")
+            case Right(_) => ()
+          }
         }
       case _ => println("1〜9の数字か q を入力してね")
     }

@@ -83,7 +83,7 @@ Parking DDD (Scala 3)
 	•	スロット番号:
 	•	`SlotNo` は値オブジェクト化済み（`SlotNo.from` で 1..9 を検証）
 	•	破損イベント列の検知:
-	•	出庫時に `CarEntered` が欠落/重複していた場合は `CorruptedEventStream` を送出
+	•	出庫時に `CarEntered` が欠落/重複していた場合は `Left(CorruptedEventStream)` を返却（`Either[DomainError, ...]`）
 	•	補正イベント（最小設計）:
 	•	コマンド: `RequestRepair`, `ReconcileSession`
 	•	イベント: `DataRepairRequested`, `SessionReconciled`
