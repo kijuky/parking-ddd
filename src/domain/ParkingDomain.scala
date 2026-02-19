@@ -123,8 +123,14 @@ object FeePolicy {
   val freeMinutes: Long = calendar.freeMinutes
   val pricingZone: ZoneId = calendar.zoneId
 
-  def pricingSummary: String =
-    s"最初の${freeMinutes}分無料 / 平日 昼(9:00-18:00) ${formatRate(weekdayDayRate)} / 平日 夜(18:00-翌9:00) ${formatRate(weekdayNightRate)} / 休日(土日) 昼(9:00-18:00) ${formatRate(weekendDayRate)} / 休日(土日) 夜(18:00-翌9:00) ${formatRate(weekendNightRate)}"
+  def pricingSummary: String = {
+    val weekdayDay = bandByName(calendar.weekdayBands, dayBand)
+    val weekdayNight = bandByName(calendar.weekdayBands, nightBand)
+    val weekendDay = bandByName(calendar.weekendBands, dayBand)
+    val weekendNight = bandByName(calendar.weekendBands, nightBand)
+
+    s"最初の${freeMinutes}分無料 / 平日 ${formatBand(weekdayDay)} / 平日 ${formatBand(weekdayNight)} / 休日(土日) ${formatBand(weekendDay)} / 休日(土日) ${formatBand(weekendNight)}"
+  }
 
   def calcMinutes(start: Instant, end: Instant): Long =
     Math.max(0L, Duration.between(start, end).toMinutes)
@@ -172,6 +178,23 @@ object FeePolicy {
     }
     s"${rate.unitMinutes}分ごと${rate.unitYen}円$cap"
   }
+
+  private def formatBand(band: TimeBand): String = {
+    val label = band.name match {
+      case `dayBand` => "昼"
+      case `nightBand` => "夜"
+      case other => other
+    }
+    s"$label(${formatTime(band.start)}-${formatEndTime(band.start, band.end)}) ${formatRate(band.rate)}"
+  }
+
+  private def formatTime(t: LocalTime): String = f"${t.getHour}%d:${t.getMinute}%02d"
+
+  private def formatEndTime(start: LocalTime, end: LocalTime): String =
+    if (end.isBefore(start)) s"翌${formatTime(end)}" else formatTime(end)
+
+  private def bandByName(bands: Vector[TimeBand], name: String): TimeBand =
+    bands.find(_.name == name).getOrElse(throw new IllegalStateException(s"Missing band: $name"))
 
   private def bandAt(at: Instant, zoneId: ZoneId): TimeBand = {
     val zdt = ZonedDateTime.ofInstant(at, zoneId)
